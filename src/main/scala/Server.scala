@@ -14,7 +14,7 @@ object Server extends App {
       post {
         entity(as[String]) {
           entity => {
-            StaticObjects.mainWorker ! entity
+            StaticObjects.mainWorker ! Request(entity)
 
             complete("Ok. Working")
           }

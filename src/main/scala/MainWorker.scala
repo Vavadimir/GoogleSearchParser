@@ -1,20 +1,24 @@
 import akka.actor.Actor
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
+import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
 import spray.json._
 
 import scala.io.Source
+import scala.util.Random
+import StaticObjects._
+
+import scala.concurrent.duration._
 
 /**
   * Created by vlad on 16.02.17.
   */
 class MainWorker extends Actor {
 
-  val http = Http(context.system)
+  private val http = Http(context.system)
 
   override def receive: Receive = {
-    case s : String =>
-      val json = s.parseJson
+    case Request(entity : String) =>
+      val json = entity.parseJson
       val fields = json.asJsObject.fields
 
       val googleConfigJson = fields("googleConfig")
@@ -30,30 +34,47 @@ class MainWorker extends Actor {
 
       val proxiesIterator = new ProxiesIterator(proxies)
 
-      for (line <- Source.fromFile(searchRequestsPath).getLines()) {
-        val proxy = proxiesIterator.next()
+      val linesIterator = Source.fromFile(searchRequestsPath).getLines()
 
-        //Build url
-        val url = ""
+      if (linesIterator.hasNext)
+        self ! MakeGoogleRequest(linesIterator, proxiesIterator, googleConfig)
 
-        http.singleRequest(HttpRequest(uri = url)).map(self ! _)
+    case MakeGoogleRequest(searchStringIterator, proxiesIterator, googleConfig) =>
+      val searchString = searchStringIterator.next()
+
+      val proxy = proxiesIterator.next()
+      val (host, port) = {
+        val s = proxy.split(":")
+        (s(0), s(1).toInt)
       }
+
+      val uri = Uri.from(scheme = "http", host = host, port = port, path = buildGoogleRequest(searchString, googleConfig))
+
+      http.singleRequest(HttpRequest(uri = uri)).map(self ! _)
+
+      if (searchStringIterator.hasNext)
+        system.scheduler.scheduleOnce(200 + new Random().nextInt(300) milliseconds,
+          self, MakeGoogleRequest(searchStringIterator, proxiesIterator, googleConfig))
 
     case HttpResponse(StatusCodes.OK, headers, entity, _) =>
       //Parse page
+      val result = List("someSite")
+      //
+
+      self ! SaveResultInDatabase(result)
+
+    case SaveResultInDatabase(result : List[String]) =>
+      //To be done
   }
 
-  class ProxiesIterator(private val proxies : List[String]) {
+  private def buildGoogleRequest(searchQuery : String, config : Map[String, String]) : String = {
+    val stringBuilder = new StringBuilder("https://www.google.com.ua/search?q=" + searchQuery + "&num=100")
 
-    private var i = 0
+    config.foreach(i => {
+      val (key, value) = i
+      stringBuilder.append(s"&$key=$value")
+    })
 
-    def next() : String = {
-      if (i == proxies.length)
-        i = 0
-      i += 1
-      proxies(i - 1)
-    }
-
+    stringBuilder.toString()
   }
-
 }
