@@ -1,13 +1,18 @@
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+
+import StaticObjects._
 import akka.actor.Actor
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
+import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
+import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonString}
+import org.mongodb.scala.{Completed, Observer}
 import spray.json._
 
+import scala.concurrent.duration._
 import scala.io.Source
 import scala.util.Random
-import StaticObjects._
-
-import scala.concurrent.duration._
 
 /**
   * Created by vlad on 16.02.17.
@@ -24,17 +29,22 @@ class MainWorker extends Actor {
       val googleConfigJson = fields("googleConfig")
       val pathsJson = fields("paths")
 
-      val googleConfig = googleConfigJson.asJsObject.fields.map(i => (i._1, i._2.toString()))
-      val paths = pathsJson.asJsObject.fields.map(i => (i._1, i._2.toString()))
+      val googleConfig = googleConfigJson.asJsObject.fields.map({
+        case (key : String, JsString(value : String)) => (key, value)
+      })
+
+      val paths = pathsJson.asJsObject.fields.map({
+        case (key : String, JsString(value : String)) => (key, value)
+      })
 
       val proxiesPath = paths("proxiesPath")
       val searchRequestsPath = paths("searchRequestsPath")
 
-      val proxies = Source.fromFile(proxiesPath).getLines().toList
+      val proxies = Source.fromFile(new File(proxiesPath)).getLines().toList
 
       val proxiesIterator = new ProxiesIterator(proxies)
 
-      val linesIterator = Source.fromFile(searchRequestsPath).getLines()
+      val linesIterator = Source.fromFile(new File(searchRequestsPath)).getLines()
 
       if (linesIterator.hasNext)
         self ! MakeGoogleRequest(linesIterator, proxiesIterator, googleConfig)
@@ -48,23 +58,40 @@ class MainWorker extends Actor {
         (s(0), s(1).toInt)
       }
 
-      val uri = Uri.from(scheme = "http", host = host, port = port, path = buildGoogleRequest(searchString, googleConfig))
+      //val uri = Uri.from(scheme = "http", host = host, port = port, path = buildGoogleRequest(searchString, googleConfig))
+      val uri = buildGoogleRequest(searchString, googleConfig)
 
-      http.singleRequest(HttpRequest(uri = uri)).map(self ! _)
+      http.singleRequest(HttpRequest(uri = uri)).map(self ! (_, searchString))
 
       if (searchStringIterator.hasNext)
         system.scheduler.scheduleOnce(200 + new Random().nextInt(300) milliseconds,
           self, MakeGoogleRequest(searchStringIterator, proxiesIterator, googleConfig))
 
-    case HttpResponse(StatusCodes.OK, headers, entity, _) =>
-      //Parse page
-      val result = List("someSite")
-      //
+    case (HttpResponse(StatusCodes.OK, _, entity, _), searchString : String) =>
+      val byteStringFuture = entity.toStrict(2 second)
 
-      self ! SaveResultInDatabase(result)
+      byteStringFuture.map(strict => {
+        val string = strict.data.utf8String
 
-    case SaveResultInDatabase(result : List[String]) =>
-      //To be done
+        val result = GooglePageParser.parse(string)
+
+        self ! SaveResultInDatabase(result, searchString)
+      })
+
+    case SaveResultInDatabase(result : List[String], searchString : String) =>
+      val dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss")
+      val date = new Date()
+      val currentDate = dateFormat.format(date)
+
+      val doc = BsonDocument("searchString" -> searchString, "time" -> BsonString(currentDate), "result" -> BsonArray(
+        result.map(BsonString(_))
+      ))
+
+      dbCollection.insertOne(doc).subscribe(new Observer[Completed] {
+        override def onError(e: Throwable): Unit = println(e)
+        override def onComplete(): Unit = println("Success")
+        override def onNext(result: Completed): Unit = {}
+      })
   }
 
   private def buildGoogleRequest(searchQuery : String, config : Map[String, String]) : String = {

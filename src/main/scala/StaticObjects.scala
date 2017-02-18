@@ -16,12 +16,12 @@ object StaticObjects {
   val mainWorker: ActorRef = system.actorOf(Props[MainWorker])
 
   val mongoDbClient = MongoClient()
-  val database: MongoDatabase = mongoDbClient.getDatabase("database")
-  val dbCollection: MongoCollection[Document] = database.getCollection("googleParser")
+  val database: MongoDatabase = mongoDbClient.getDatabase("local")
+  val dbCollection: MongoCollection[Document] = database.getCollection("GoogleParserCollection")
 
   case class Request(entity : String)
   case class MakeGoogleRequest(searchStringIterator : Iterator[String], proxiesInterator : ProxiesIterator, googleConfig : Map[String, String])
-  case class SaveResultInDatabase(result : List[String])
+  case class SaveResultInDatabase(result : List[String], searchString : String)
 
   class ProxiesIterator(private val proxies : List[String]) {
 
