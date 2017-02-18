@@ -1,8 +1,8 @@
+import StaticObjects._
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
-import scala.io.StdIn
 
-import StaticObjects._
+import scala.io.StdIn
 
 /**
   * Created by vlad on 16.02.17.
