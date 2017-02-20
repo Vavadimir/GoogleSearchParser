@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ScalaCompilerConfiguration">
+    <option name="postfixOps" value="true" />
     <profile name="SBT 1" modules="googlepageparser">
+      <option name="postfixOps" value="true" />
+    </profile>
+    <profile name="SBT 2" modules="googlesearchparser">
       <option name="postfixOps" value="true" />
     </profile>
   </component>

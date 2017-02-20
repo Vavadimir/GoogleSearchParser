@@ -1,9 +1,10 @@
-import java.io.File
+import java.io.{File, FileReader, LineNumberReader}
 import java.text.SimpleDateFormat
 import java.util.Date
 
 import StaticObjects._
 import akka.actor.Actor
+import akka.pattern.ask
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes}
 import org.mongodb.scala.bson.{BsonArray, BsonDocument, BsonString}
@@ -20,6 +21,9 @@ import scala.util.Random
 class MainWorker extends Actor {
 
   private val http = Http(context.system)
+
+  var searchRequestsFileLength : Long = 0
+  var searchResultsProcessed : Long = 0
 
   override def receive: Receive = {
     case Request(entity : String) =>
@@ -40,7 +44,14 @@ class MainWorker extends Actor {
       val proxiesPath = paths("proxiesPath")
       val searchRequestsPath = paths("searchRequestsPath")
 
-      val proxies = Source.fromFile(new File(proxiesPath)).getLines().toList
+      (self ? GetFileLength(searchRequestsPath)).map({
+        case length : Long => searchRequestsFileLength = {
+          searchResultsProcessed = 0
+          length
+        }
+      })
+
+      val proxies = Source.fromFile(new File(proxiesPath)).getLines().toArray
 
       val proxiesIterator = new ProxiesIterator(proxies)
 
@@ -79,7 +90,9 @@ class MainWorker extends Actor {
       })
 
     case SaveResultInDatabase(result : List[String], searchString : String) =>
-      val dateFormat = new SimpleDateFormat("yyyy/MM/dd HH:mm:ss")
+      searchResultsProcessed += 1
+
+      val dateFormat = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss")
       val date = new Date()
       val currentDate = dateFormat.format(date)
 
@@ -89,9 +102,18 @@ class MainWorker extends Actor {
 
       dbCollection.insertOne(doc).subscribe(new Observer[Completed] {
         override def onError(e: Throwable): Unit = println(e)
-        override def onComplete(): Unit = println("Success")
+        override def onComplete(): Unit = {
+          if (progressMessagePublisher != null && searchRequestsFileLength != 0)
+            progressMessagePublisher ! searchResultsProcessed.toDouble / searchRequestsFileLength
+          println("Success: " + searchString)
+        }
         override def onNext(result: Completed): Unit = {}
       })
+
+    case GetFileLength(filePath : String) =>
+      val lnr = new LineNumberReader(new FileReader(filePath))
+      while(lnr.skip(Long.MaxValue) > 0){}
+      context.sender() ! lnr.getLineNumber.toLong
   }
 
   private def buildGoogleRequest(searchQuery : String, config : Map[String, String]) : String = {

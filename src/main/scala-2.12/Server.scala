@@ -1,6 +1,10 @@
 import StaticObjects._
+import akka.actor.Props
 import akka.http.scaladsl.Http
+import akka.http.scaladsl.model.ws.UpgradeToWebSocket
 import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.ExpectedWebSocketRequestRejection
+import akka.stream.scaladsl.{Sink, Source}
 
 import scala.io.StdIn
 
@@ -18,6 +22,19 @@ object Server extends App {
 
             complete("Ok. Working")
           }
+        }
+      }
+    } ~ {
+      path("progress") {
+        optionalHeaderValueByType[UpgradeToWebSocket]() {
+          case Some(upgrade) =>
+            complete {
+              upgrade.handleMessagesWithSinkSource(
+                Sink.ignore,
+                Source.actorPublisher(Props[ProgressMessagePublisher])
+              )
+            }
+          case None => reject(ExpectedWebSocketRequestRejection)
         }
       }
     }
